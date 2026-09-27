@@ -1,9 +1,6 @@
 --[[
-    YUSZX - Auto Return After Grab
-    Cara pakai:
-    1. Jalan manual ke BASE, terus ketik: setBase()
-    2. Jalan ke bioma, ambil telur
-    3. Pas telur ke-grab, otomatis TP balik ke base
+    YUSZX - Auto Return v2 (Anti-Crash)
+    Deteksi telur masuk inventory, bukan hook remote
 ]]
 
 local Players = game:GetService("Players")
@@ -13,9 +10,9 @@ local UIS = game:GetService("UserInputService")
 -- ========== CONFIG ==========
 local BASE_CFRAME = nil
 local AUTO_RETURN = true
-local RETURN_DELAY = 0.3  -- Delay sebelum TP (biar grab selesai dulu)
+local RETURN_DELAY = 0.3
 
--- ========== FUNGSI SAVE BASE ==========
+-- ========== SET BASE ==========
 _G.setBase = function()
     local char = LocalPlayer.Character
     if not char then return warn("Karakter belum spawn") end
@@ -23,76 +20,78 @@ _G.setBase = function()
     if not root then return warn("Root gak ada") end
     
     BASE_CFRAME = root.CFrame
-    warn("✅ Base tersimpan di: " .. tostring(root.Position))
-    warn("Sekarang jalan ke bioma & ambil telur!")
+    warn("✅ Base tersimpan: " .. tostring(root.Position))
 end
 
 _G.tpBase = function()
-    if not BASE_CFRAME then return warn("❌ Base belum diset! Ketik setBase() dulu") end
+    if not BASE_CFRAME then return warn("❌ Base belum diset!") end
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
     if root then
-        root.CFrame = BASE_CFRAME
+        pcall(function()
+            root.CFrame = BASE_CFRAME
+        end)
         warn("🚀 TP ke base!")
     end
 end
 
--- ========== HOOK DETECT GRAB EGG ==========
-local mt = getrawmetatable(game)
-local oldNamecall = mt.__namecall
-setreadonly(mt, false)
-
-local SKIP = {
-    ["statsreport"] = true, ["stats"] = true, ["ping"] = true,
-    ["heartbeat"] = true, ["log"] = true, ["render"] = true,
-}
-
-local isReturning = false
-
-mt.__namecall = newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    local args = {...}
-    local name = string.lower(self.Name)
-    local fullName = string.lower(self:GetFullName())
+-- ========== DETEKSI EGG MASUK INVENTORY ==========
+local function watchInventory(container)
+    if not container then return end
     
-    if (method == "FireServer" or method == "InvokeServer") and not SKIP[name] then
-        -- Cek apakah ini remote grab/steal egg
-        local isGrabRemote = string.find(name, "grab")
-            or string.find(name, "steal")
-            or string.find(name, "egg")
-            or string.find(name, "collect")
-            or string.find(name, "pickup")
-            or string.find(fullName, "egg")
-            or string.find(fullName, "grab")
+    container.ChildAdded:Connect(function(child)
+        if not AUTO_RETURN or not BASE_CFRAME then return end
         
-        if isGrabRemote then
-            warn("🎯 Egg grab terdeteksi: " .. self:GetFullName())
+        local name = string.lower(child.Name)
+        local className = string.lower(child.ClassName)
+        
+        -- Deteksi kalau ini telur/tool baru
+        local isEgg = string.find(name, "egg") 
+            or string.find(name, "telur")
+            or string.find(name, "pet")
+            or className == "tool"
+        
+        if isEgg then
+            warn("🥚 Egg terdeteksi: " .. child.Name)
+            task.wait(RETURN_DELAY)
             
-            -- Auto TP balik ke base setelah delay
-            if AUTO_RETURN and BASE_CFRAME and not isReturning then
-                isReturning = true
-                task.spawn(function()
-                    task.wait(RETURN_DELAY)
-                    local char = LocalPlayer.Character
-                    if char then
-                        local root = char:FindFirstChild("HumanoidRootPart")
-                        if root then
-                            root.CFrame = BASE_CFRAME
-                            warn("🚀 Auto return ke base!")
-                        end
-                    end
-                    task.wait(1)
-                    isReturning = false
-                end)
+            local char = LocalPlayer.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function()
+                        root.CFrame = BASE_CFRAME
+                    end)
+                    warn("🚀 Auto return ke base!")
+                end
             end
         end
-    end
+    end)
+end
+
+-- Watch Backpack & Character
+local function setupWatchers()
+    local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+    if backpack then watchInventory(backpack) end
     
-    return oldNamecall(self, ...)
+    local char = LocalPlayer.Character
+    if char then watchInventory(char) end
+end
+
+-- Kalau backpack/character baru muncul (respawn)
+LocalPlayer.ChildAdded:Connect(function(child)
+    if child:IsA("Backpack") then
+        watchInventory(child)
+    end
 end)
 
-setreadonly(mt, true)
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    watchInventory(char)
+end)
+
+setupWatchers()
 
 -- ========== UI ==========
 local ScreenGui = Instance.new("ScreenGui")
@@ -102,8 +101,8 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.ResetOnSpawn = false
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 320, 0, 230)
-MainFrame.Position = UDim2.new(0.5, -160, 0.5, -115)
+MainFrame.Size = UDim2.new(0, 320, 0, 240)
+MainFrame.Position = UDim2.new(0.5, -160, 0.5, -120)
 MainFrame.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -134,7 +133,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -80, 1, 0)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.BackgroundTransparency = 1
-Title.Text = "YUSZX | Auto Return"
+Title.Text = "YUSZX | Auto Return v2"
 Title.TextColor3 = Color3.fromRGB(0, 200, 255)
 Title.Font = Enum.Font.Code
 Title.TextSize = 13
@@ -168,12 +167,24 @@ StatusLabel.TextSize = 12
 StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 StatusLabel.Parent = MainFrame
 
--- Tombol Set Base
+-- Log
+local LogLabel = Instance.new("TextLabel")
+LogLabel.Size = UDim2.new(1, -20, 0, 20)
+LogLabel.Position = UDim2.new(0, 10, 0, 68)
+LogLabel.BackgroundTransparency = 1
+LogLabel.Text = "Log: -"
+LogLabel.TextColor3 = Color3.fromRGB(150, 180, 220)
+LogLabel.Font = Enum.Font.Code
+LogLabel.TextSize = 10
+LogLabel.TextXAlignment = Enum.TextXAlignment.Left
+LogLabel.Parent = MainFrame
+
+-- Set Base
 local SetBaseBtn = Instance.new("TextButton")
 SetBaseBtn.Size = UDim2.new(1, -20, 0, 40)
-SetBaseBtn.Position = UDim2.new(0, 10, 0, 78)
+SetBaseBtn.Position = UDim2.new(0, 10, 0, 92)
 SetBaseBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 180)
-SetBaseBtn.Text = "📍 SET BASE (Dari Posisi Sekarang)"
+SetBaseBtn.Text = "📍 SET BASE (Hotkey: N)"
 SetBaseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SetBaseBtn.Font = Enum.Font.Code
 SetBaseBtn.TextSize = 12
@@ -183,12 +194,12 @@ local SetCorner = Instance.new("UICorner")
 SetCorner.CornerRadius = UDim.new(0, 6)
 SetCorner.Parent = SetBaseBtn
 
--- Tombol TP Manual
+-- TP ke base
 local TpBtn = Instance.new("TextButton")
 TpBtn.Size = UDim2.new(1, -20, 0, 40)
-TpBtn.Position = UDim2.new(0, 10, 0, 125)
+TpBtn.Position = UDim2.new(0, 10, 0, 140)
 TpBtn.BackgroundColor3 = Color3.fromRGB(0, 60, 120)
-TpBtn.Text = "🚀 TP KE BASE (Manual)"
+TpBtn.Text = "🚀 TP KE BASE (Hotkey: B)"
 TpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 TpBtn.Font = Enum.Font.Code
 TpBtn.TextSize = 12
@@ -198,10 +209,10 @@ local TpCorner = Instance.new("UICorner")
 TpCorner.CornerRadius = UDim.new(0, 6)
 TpCorner.Parent = TpBtn
 
--- Toggle Auto
+-- Auto Toggle
 local AutoBtn = Instance.new("TextButton")
 AutoBtn.Size = UDim2.new(1, -20, 0, 40)
-AutoBtn.Position = UDim2.new(0, 10, 0, 172)
+AutoBtn.Position = UDim2.new(0, 10, 0, 188)
 AutoBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 50)
 AutoBtn.Text = "✅ AUTO RETURN: ON"
 AutoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -218,10 +229,12 @@ SetBaseBtn.MouseButton1Click:Connect(function()
     _G.setBase()
     StatusLabel.Text = "Base: ✅ Tersimpan"
     StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+    LogLabel.Text = "Log: Base diset di " .. tostring(BASE_CFRAME.Position)
 end)
 
 TpBtn.MouseButton1Click:Connect(function()
     _G.tpBase()
+    LogLabel.Text = "Log: TP manual ke base"
 end)
 
 AutoBtn.MouseButton1Click:Connect(function()
@@ -239,7 +252,7 @@ CloseButton.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- ========== HOTKEY ==========
+-- Hotkeys
 UIS.InputBegan:Connect(function(input, gpe)
     if gpe then return end
     if input.KeyCode == Enum.KeyCode.B then
@@ -251,16 +264,11 @@ UIS.InputBegan:Connect(function(input, gpe)
     end
 end)
 
--- ========== INIT ==========
 warn("========================================")
-warn("YUSZX AUTO RETURN LOADED")
+warn("YUSZX AUTO RETURN v2 (Anti-Crash)")
 warn("========================================")
-warn("Cara pakai:")
-warn("  1. Jalan ke BASE, klik 'SET BASE' (atau tekan N)")
-warn("  2. Jalan ke bioma, ambil telur")
-warn("  3. Otomatis TP balik ke base! ✅")
-warn("")
-warn("Hotkey:")
-warn("  B = TP ke base")
-warn("  N = Set base")
+warn("1. Jalan ke BASE, klik SET BASE (atau N)")
+warn("2. Jalan ke bioma, ambil telur")
+warn("3. Otomatis TP balik!")
+warn("Hotkey: B = TP base, N = Set base")
 warn("========================================")
